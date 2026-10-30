@@ -1,0 +1,676 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HyperKaymak Shader</title>
+<meta name="description" content="HyperKaymak Shader: a real-time volumetric raymarching WebGL shader built to push your GPU to the limit.">
+<meta name="theme-color" content="#0a0814">
+<meta property="og:title" content="HyperKaymak Shader">
+<meta property="og:description" content="A volumetric WebGL shader that pushes your GPU to the limit. Four load levels, live FPS meter.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3CradialGradient id='g' cx='.4' cy='.35' r='.7'%3E%3Cstop offset='0' stop-color='%23fff6e0'/%3E%3Cstop offset='.5' stop-color='%23ffb84d'/%3E%3Cstop offset='1' stop-color='%237b4dff'/%3E%3C/radialGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='14' fill='%230a0814'/%3E%3Ccircle cx='32' cy='32' r='20' fill='none' stroke='url(%23g)' stroke-width='10'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;700;900&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: full-bleed WebGL canvas; a centred warning gate; in-run a floating glass toolbar at the bottom with a collapsible stats panel. Dark single look by design. */
+:root{
+  --void:#0a0814; --glass:rgba(16,12,30,.78); --glass-hi:rgba(28,22,52,.9);
+  --line:rgba(255,243,214,.12); --line-hi:rgba(255,243,214,.28);
+  --cream:#fff3d6; --honey:#ffb84d; --plum:#7b4dff; --mint:#7cf3d8; --danger:#ff5d73;
+  --dim:#a59fc4; --faint:#6e688f;
+  --display:"Unbounded", "Arial Black", system-ui, sans-serif;
+  --mono:"JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --r:10px;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--void);color:var(--cream);font-family:var(--mono);font-size:14px;overflow:hidden;-webkit-font-smoothing:antialiased}
+[hidden]{display:none!important}
+button,select,input{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--honey);outline-offset:2px}
+
+canvas#c{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:grab}
+canvas#c:active{cursor:grabbing}
+
+/* ---------- Gate ---------- */
+.gate{position:fixed;inset:0;z-index:10;overflow:auto;display:grid;place-items:center;
+  padding:max(24px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(24px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+  background:
+    radial-gradient(60% 50% at 70% 20%, rgba(123,77,255,.28), transparent 70%),
+    radial-gradient(50% 45% at 20% 85%, rgba(255,184,77,.16), transparent 70%),
+    var(--void)}
+.gate::before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.35;
+  background-image:radial-gradient(rgba(255,243,214,.5) 1px, transparent 1px);background-size:28px 28px;
+  mask-image:radial-gradient(70% 60% at 50% 45%, #000 20%, transparent 80%);-webkit-mask-image:radial-gradient(70% 60% at 50% 45%, #000 20%, transparent 80%)}
+.card{position:relative;width:100%;max-width:640px;display:flex;flex-direction:column;gap:22px;padding:clamp(20px, 5vw, 36px);
+  background:var(--glass);border:1px solid var(--line);border-radius:18px;backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+  box-shadow:0 30px 80px -20px rgba(0,0,0,.7)}
+.brandrow{display:flex;align-items:center;gap:14px}
+.mark{width:48px;height:48px;flex:none;border-radius:14px;background:var(--void);display:grid;place-items:center;border:1px solid var(--line)}
+.mark i{width:28px;height:28px;border-radius:50%;border:7px solid transparent;
+  background:conic-gradient(from 200deg, var(--cream), var(--honey), var(--plum), var(--cream)) border-box;
+  -webkit-mask:linear-gradient(#000 0 0) padding-box, linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;
+  animation:spin 6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+h1{margin:0;font-family:var(--display);font-weight:900;font-size:clamp(28px, 7vw, 46px);line-height:.95;letter-spacing:-.01em;text-wrap:balance}
+h1 .k{background:linear-gradient(100deg, var(--cream) 0%, var(--honey) 55%, #ff8a5c 100%);-webkit-background-clip:text;background-clip:text;color:transparent}
+h1 small{display:block;font-weight:400;font-size:.42em;letter-spacing:.32em;text-transform:uppercase;color:var(--dim);margin-top:8px}
+
+.warn{display:flex;gap:14px;padding:14px 16px;border-radius:var(--r);border:1px solid rgba(255,184,77,.35);background:rgba(255,184,77,.07)}
+.warn svg{flex:none;width:22px;height:22px;color:var(--honey);margin-top:1px}
+.warn p{margin:0;line-height:1.55;font-size:13.5px}
+.warn strong{color:var(--honey);display:block;font-family:var(--display);font-weight:700;font-size:12px;letter-spacing:.14em;text-transform:uppercase;margin-bottom:4px}
+
+.risks{display:grid;grid-template-columns:repeat(2, minmax(0,1fr));gap:8px;margin:0;padding:0;list-style:none}
+.risks li{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:var(--r);background:rgba(255,243,214,.03);border:1px solid var(--line);font-size:12.5px;line-height:1.45;color:var(--dim);min-width:0}
+.risks li b{color:var(--cream);font-weight:600;display:block}
+.risks .ic{flex:none;width:18px;height:18px;color:var(--honey);margin-top:1px}
+
+.sec{display:flex;flex-direction:column;gap:10px}
+.lbl{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint)}
+.levels{display:grid;grid-template-columns:repeat(4, minmax(0,1fr));gap:8px}
+.lv{position:relative;display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:var(--r);border:1px solid var(--line);background:rgba(255,243,214,.02);cursor:pointer;transition:border-color .15s, background .15s;min-width:0}
+.lv:hover{border-color:var(--line-hi)}
+.lv input{position:absolute;opacity:0;pointer-events:none}
+.lv .nm{font-family:var(--display);font-weight:700;font-size:13px}
+.lv .sp{font-size:10.5px;color:var(--faint);line-height:1.4}
+.bars{display:flex;gap:3px}
+.bars span{height:4px;flex:1;border-radius:2px;background:rgba(255,243,214,.12)}
+.lv[data-l="0"] .bars span:nth-child(-n+1), .lv[data-l="1"] .bars span:nth-child(-n+2),
+.lv[data-l="2"] .bars span:nth-child(-n+3){background:var(--honey)}
+.lv[data-l="3"] .bars span:nth-child(-n+4){background:#ff8a5c}
+.lv[data-l="4"] .bars span{background:var(--danger);box-shadow:0 0 8px rgba(255,93,115,.55)}
+.lv[data-l="4"]{grid-column:1/-1;flex-direction:row;flex-wrap:wrap;align-items:center;gap:8px 16px;border-color:rgba(255,93,115,.35);
+  background:linear-gradient(100deg, rgba(255,93,115,.08), rgba(123,77,255,.10))}
+.lv[data-l="4"] .nm{font-weight:900;font-size:14px}
+.lv[data-l="4"] .bars{flex:1;min-width:110px}
+.lv[data-l="4"] .sp{width:100%}
+.lv:has(input:checked){border-color:var(--honey);background:rgba(255,184,77,.09)}
+.lv[data-l="3"]:has(input:checked), .lv[data-l="4"]:has(input:checked){border-color:var(--danger);background:rgba(255,93,115,.1)}
+.lv:has(input:focus-visible){outline:2px solid var(--honey);outline-offset:2px}
+
+.ack{display:flex;gap:12px;align-items:flex-start;cursor:pointer;font-size:13px;line-height:1.5;color:var(--dim)}
+.ack input{appearance:none;-webkit-appearance:none;flex:none;width:20px;height:20px;margin:0;border-radius:6px;border:1.5px solid var(--line-hi);display:grid;place-items:center;cursor:pointer;transition:.15s}
+.ack input:checked{background:var(--honey);border-color:var(--honey)}
+.ack input:checked::after{content:"";width:5px;height:10px;border:solid var(--void);border-width:0 2.5px 2.5px 0;transform:translateY(-1px) rotate(45deg)}
+.ack:has(input:checked){color:var(--cream)}
+
+.go{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;padding:16px 20px;border:0;border-radius:12px;cursor:pointer;
+  font-family:var(--display);font-weight:700;font-size:15px;letter-spacing:.08em;text-transform:uppercase;color:#1a1008;
+  background:linear-gradient(100deg, var(--cream), var(--honey) 60%, #ff8a5c);transition:transform .12s, filter .15s, opacity .15s}
+.go:hover:not(:disabled){transform:translateY(-1px);filter:brightness(1.05)}
+.go:disabled{opacity:.28;cursor:not-allowed;filter:grayscale(.6)}
+.foot{display:flex;flex-wrap:wrap;gap:6px 14px;justify-content:center;font-size:11px;color:var(--faint)}
+kbd{font-family:var(--mono);font-size:10.5px;padding:2px 6px;border-radius:4px;border:1px solid var(--line-hi);color:var(--cream);background:rgba(255,243,214,.05)}
+.err{margin:0;padding:12px 14px;border-radius:var(--r);background:rgba(255,93,115,.1);border:1px solid rgba(255,93,115,.4);color:#ffc2cb;font-size:12.5px;line-height:1.5}
+
+/* ---------- Run UI ---------- */
+.top{position:fixed;z-index:4;top:calc(14px + env(safe-area-inset-top, 0px));left:max(14px, env(safe-area-inset-left, 0px));right:max(14px, env(safe-area-inset-right, 0px));
+  display:flex;justify-content:space-between;align-items:flex-start;gap:10px;pointer-events:none}
+.top > *{pointer-events:auto}
+.chip{display:flex;align-items:center;gap:10px;padding:8px 12px 8px 8px;border-radius:12px;background:var(--glass);border:1px solid var(--line);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+.chip .mark{width:30px;height:30px;border-radius:9px}
+.chip .mark i{width:18px;height:18px;border-width:4.5px}
+.chip b{font-family:var(--display);font-weight:700;font-size:12.5px;letter-spacing:.02em;white-space:nowrap}
+.chip b em{font-style:normal;color:var(--honey)}
+
+.stats{min-width:210px;padding:12px 14px;border-radius:12px;background:var(--glass);border:1px solid var(--line);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  display:flex;flex-direction:column;gap:8px;font-variant-numeric:tabular-nums}
+.fpsline{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+#fps{font-family:var(--display);font-weight:700;font-size:28px;line-height:1;color:var(--mint);transition:color .3s}
+#fps.mid{color:var(--honey)} #fps.low{color:var(--danger)}
+.fpsline span{font-size:10.5px;letter-spacing:.16em;color:var(--faint)}
+#spark{width:100%;height:34px;display:block}
+.kv{display:flex;justify-content:space-between;gap:14px;font-size:11.5px;color:var(--dim)}
+.kv b{color:var(--cream);font-weight:600}
+.alert{font-size:11.5px;line-height:1.45;color:var(--honey);padding-top:6px;border-top:1px solid var(--line);max-width:220px}
+
+.dock{position:fixed;z-index:4;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom, 0px));
+  display:flex;align-items:center;gap:6px;padding:6px;border-radius:16px;background:var(--glass-hi);border:1px solid var(--line);
+  backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);box-shadow:0 18px 50px -12px rgba(0,0,0,.7);max-width:calc(100% - 24px);flex-wrap:wrap;justify-content:center}
+.seg{display:flex;gap:2px;padding:3px;border-radius:11px;background:rgba(0,0,0,.35)}
+.seg button{border:0;background:transparent;padding:8px 11px;border-radius:8px;cursor:pointer;font-size:12px;color:var(--dim);transition:.15s;white-space:nowrap}
+.seg button:hover{color:var(--cream)}
+.seg button[aria-pressed="true"]{background:var(--honey);color:#1a1008;font-weight:600}
+.seg button[data-l="3"][aria-pressed="true"], .seg button[data-l="4"][aria-pressed="true"]{background:var(--danger);color:#1a0508}
+.sep{width:1px;height:26px;background:var(--line);margin:0 2px}
+.ib{display:grid;place-items:center;width:38px;height:38px;border-radius:10px;border:0;background:transparent;cursor:pointer;color:var(--cream);transition:background .15s}
+.ib:hover{background:rgba(255,243,214,.08)}
+.ib svg{width:18px;height:18px}
+.ib.stop{color:var(--danger)}
+.ib.stop:hover{background:rgba(255,93,115,.14)}
+
+.toast{position:fixed;z-index:6;left:50%;transform:translate(-50%, 0);bottom:calc(84px + env(safe-area-inset-bottom, 0px));
+  padding:9px 14px;border-radius:10px;background:var(--glass-hi);border:1px solid var(--line);font-size:12px;transition:opacity .25s, transform .25s}
+.toast.off{opacity:0;transform:translate(-50%, 6px);pointer-events:none}
+
+
+.lang{display:flex;gap:2px;padding:3px;border-radius:9px;background:rgba(0,0,0,.35);border:1px solid var(--line)}
+.lang button{border:0;background:transparent;padding:5px 9px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600;letter-spacing:.08em;color:var(--dim)}
+.lang button:hover{color:var(--cream)}
+.lang button[aria-pressed="true"]{background:var(--cream);color:var(--void)}
+.brandrow{justify-content:space-between;flex-wrap:wrap}
+.brandrow .id{display:flex;align-items:center;gap:14px;min-width:0}
+.chip .lang{margin-left:4px}
+.note{margin:0;padding:12px 14px;border-radius:var(--r);border:1px solid rgba(255,93,115,.4);background:rgba(255,93,115,.08);color:#ffc2cb;font-size:12.5px;line-height:1.5}
+.prog{height:4px;border-radius:2px;background:rgba(255,243,214,.1);overflow:hidden}
+.prog i{display:block;height:100%;width:0;background:linear-gradient(90deg, var(--honey), var(--danger))}
+.progwrap{display:flex;flex-direction:column;gap:6px}
+@media (max-width:620px){
+  .risks{grid-template-columns:1fr}
+  .levels{grid-template-columns:repeat(2, minmax(0,1fr))}
+  .stats{min-width:0;padding:10px 12px}
+  #fps{font-size:22px}
+  .kv.opt{display:none}
+  .chip b{font-size:11px}
+  .seg button{padding:8px 8px;font-size:11px}
+}
+@media (prefers-reduced-motion:reduce){ .mark i{animation:none} *{transition:none!important} }
+</style>
+</head>
+<body>
+
+<canvas id="c" data-i18n-aria="canvasAria" aria-label="HyperKaymak volumetric shader view"></canvas>
+
+<!-- ================= GATE ================= -->
+<div class="gate" id="gate">
+  <form class="card" id="gateForm" novalidate>
+    <div class="brandrow">
+      <div class="id">
+        <div class="mark" aria-hidden="true"><i></i></div>
+        <h1>Hyper<span class="k">Kaymak</span><small>Volumetric Shader</small></h1>
+      </div>
+      <div class="lang" role="group" aria-label="Language / Dil">
+        <button type="button" data-lang="en">EN</button>
+        <button type="button" data-lang="tr">TR</button>
+      </div>
+    </div>
+
+    <div class="warn" role="note">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></svg>
+      <p><strong data-i18n="warnT"></strong><span data-i18n="warnD"></span></p>
+    </div>
+
+    <ul class="risks">
+      <li><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M14 14.8V4a2 2 0 1 0-4 0v10.8a4 4 0 1 0 4 0Z"/></svg><span><b data-i18n="r1t"></b><span data-i18n="r1d"></span></span></li>
+      <li><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 11v2M6 11v2"/></svg><span><b data-i18n="r2t"></b><span data-i18n="r2d"></span></span></li>
+      <li><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span><b data-i18n="r3t"></b><span data-i18n="r3d"></span></span></li>
+      <li><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg><span><b data-i18n="r4t"></b><span data-i18n="r4d"></span></span></li>
+    </ul>
+
+    <div class="sec">
+      <div class="lbl" data-i18n="levelLbl"></div>
+      <div class="levels">
+        <label class="lv" data-l="0"><input type="radio" name="lvl" id="lvl0" value="0"><span class="nm" data-i18n="l0"></span><span class="bars"><span></span><span></span><span></span><span></span><span></span></span><span class="sp" data-i18n="s0"></span></label>
+        <label class="lv" data-l="1"><input type="radio" name="lvl" id="lvl1" value="1" checked><span class="nm" data-i18n="l1"></span><span class="bars"><span></span><span></span><span></span><span></span><span></span></span><span class="sp" data-i18n="s1"></span></label>
+        <label class="lv" data-l="2"><input type="radio" name="lvl" id="lvl2" value="2"><span class="nm" data-i18n="l2"></span><span class="bars"><span></span><span></span><span></span><span></span><span></span></span><span class="sp" data-i18n="s2"></span></label>
+        <label class="lv" data-l="3"><input type="radio" name="lvl" id="lvl3" value="3"><span class="nm" data-i18n="l3"></span><span class="bars"><span></span><span></span><span></span><span></span><span></span></span><span class="sp" data-i18n="s3"></span></label>
+        <label class="lv" data-l="4"><input type="radio" name="lvl" id="lvl4" value="4"><span class="nm" data-i18n="l4"></span><span class="bars"><span></span><span></span><span></span><span></span><span></span></span><span class="sp" data-i18n="s4"></span></label>
+      </div>
+    </div>
+
+    <p class="note" id="beyondNote" data-i18n="beyondNote" hidden></p>
+
+    <label class="ack"><input type="checkbox" id="ack"> <span data-i18n="ack"></span></label>
+    <button class="go" id="go" type="submit" disabled data-i18n="start"></button>
+    <div class="foot">
+      <span><kbd>Esc</kbd> <span data-i18n="kStop"></span></span>
+      <span><kbd data-i18n="kSpace"></kbd> <span data-i18n="kPause"></span></span>
+      <span><kbd>1</kbd>–<kbd>5</kbd> <span data-i18n="kLevel"></span></span>
+      <span><kbd>F</kbd> <span data-i18n="kFull"></span></span>
+    </div>
+    <p class="err" id="err" hidden></p>
+  </form>
+</div>
+
+<!-- ================= RUN UI ================= -->
+<div class="top" id="top" hidden>
+  <div class="chip">
+    <div class="mark" aria-hidden="true"><i></i></div><b>Hyper<em>Kaymak</em></b>
+    <div class="lang" role="group" aria-label="Language / Dil">
+      <button type="button" data-lang="en">EN</button>
+      <button type="button" data-lang="tr">TR</button>
+    </div>
+  </div>
+  <div class="stats" id="stats">
+    <div class="fpsline"><b id="fps">–</b><span>FPS</span></div>
+    <canvas id="spark" width="200" height="34" aria-hidden="true"></canvas>
+    <div class="kv"><span data-i18n="frameTime"></span><b id="ms">–</b></div>
+    <div class="kv opt"><span data-i18n="resolution"></span><b id="res">–</b></div>
+    <div class="kv opt"><span data-i18n="noiseCalls"></span><b id="ops">–</b></div>
+    <div class="kv"><span data-i18n="scaleLbl"></span><b id="scl">–</b></div>
+    <div class="progwrap" id="progWrap" hidden>
+      <div class="kv"><span data-i18n="progress"></span><b id="pct">0%</b></div>
+      <div class="prog"><i id="bar"></i></div>
+    </div>
+    <div class="alert" id="alert" hidden></div>
+  </div>
+</div>
+
+<div class="dock" id="dock" hidden>
+  <div class="seg" role="group" data-i18n-aria="levelLbl" aria-label="Load level">
+    <button type="button" data-l="0" data-i18n="l0"></button>
+    <button type="button" data-l="1" data-i18n="l1"></button>
+    <button type="button" data-l="2" data-i18n="l2"></button>
+    <button type="button" data-l="3" data-i18n="l3"></button>
+    <button type="button" data-l="4" data-i18n="l4"></button>
+  </div>
+  <span class="sep" aria-hidden="true"></span>
+  <button class="ib" id="pause" type="button">
+    <svg id="icPause" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+    <svg id="icPlay" viewBox="0 0 24 24" fill="currentColor" hidden><path d="M7 4.5v15a1 1 0 0 0 1.5.9l12-7.5a1 1 0 0 0 0-1.8l-12-7.5A1 1 0 0 0 7 4.5Z"/></svg>
+  </button>
+  <button class="ib" id="shot" type="button" data-i18n-title="shotT" data-i18n-aria="shotT">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8a2 2 0 0 1 2-2h1.5l1.5-2h6l1.5 2H18a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"/><circle cx="12" cy="12.5" r="3.5"/></svg>
+  </button>
+  <button class="ib" id="full" type="button" data-i18n-title="fullT" data-i18n-aria="fullT">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4"/></svg>
+  </button>
+  <button class="ib stop" id="stop" type="button" data-i18n-title="stopT" data-i18n-aria="stopT">
+    <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+  </button>
+</div>
+
+<div class="toast off" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(() => {
+"use strict";
+const I18N = {
+  en: {
+    canvasAria:"HyperKaymak volumetric shader view",
+    warnT:"Heavy load warning",
+    warnD:"This page raymarches hundreds of volumetric steps with shadow rays for every single pixel. It is built to push your graphics card to its limit.",
+    r1t:"Heat", r1d:"Your device will heat up and fans may spin hard.",
+    r2t:"Battery", r2d:"Drains fast on phones and laptops.",
+    r3t:"Freezing", r3d:"The browser may stall for a few seconds.",
+    r4t:"Visuals", r4d:"No flashing, only slowly flowing colours.",
+    levelLbl:"Load level",
+    l4:"Beyond", s4:"512 steps · 8× supersampling · tiled render",
+    beyondNote:"Beyond renders a single frame at 8× resolution, tile by tile. One frame can take minutes and needs a lot of video memory. Rotating the view starts a new render.",
+    scaleLbl:"Scale", progress:"Render progress", trillion:"trillion",
+    done:"Render complete. Save a screenshot to keep it.", encoding:"Encoding image…",
+    l0:"Warm-up", l1:"Heavy", l2:"Crushing", l3:"Doomsday",
+    s0:"96 steps · 0.6× resolution", s1:"192 steps · 1× resolution", s2:"384 steps · Retina", s3:"512 steps · 1.5× supersampling",
+    ack:"I have read the risks. I accept that my device may heat up and slow down.",
+    start:"Start",
+    kStop:"stop", kSpace:"Space", kPause:"pause", kLevel:"level", kFull:"fullscreen",
+    frameTime:"Frame time", resolution:"Resolution", noiseCalls:"Noise calls / frame",
+    billion:"billion", million:"million",
+    pause:"Pause", resume:"Resume", spaceKey:"Space",
+    shotT:"Save screenshot", fullT:"Fullscreen (F)", stopT:"Stop (Esc)",
+    levelToast:l=>l+" level", paused:"Paused", resumed:"Running",
+    slow:"Frame rate is below 4. Your device is struggling; consider dropping a level.",
+    shotOk:"Screenshot saved", shotFail:"Could not capture the image",
+    fullFail:"Fullscreen could not be opened in this browser", fullNo:"Fullscreen is not supported in this browser",
+    spin:"Auto-rotate on",
+    noGL:"This browser does not support WebGL.", compile:"Shader failed to compile: ",
+    lost:"The graphics driver reset the context; your GPU could not handle the load. Try again with a lower level."
+  },
+  tr: {
+    canvasAria:"HyperKaymak hacimsel shader görüntüsü",
+    warnT:"Ağır yük uyarısı",
+    warnD:"Bu sayfa her piksel için yüzlerce adımlık hacimsel ışın yürütme ve gölge hesabı yapar. Ekran kartını bilerek sonuna kadar zorlar.",
+    r1t:"Isınma", r1d:"Cihaz ısınır, fanlar hızlanabilir.",
+    r2t:"Pil", r2d:"Telefon ve dizüstünde hızla biter.",
+    r3t:"Donma", r3d:"Tarayıcı birkaç saniye takılabilir.",
+    r4t:"Görüntü", r4d:"Yanıp sönme yok, yavaş akan renkler var.",
+    levelLbl:"Yük seviyesi",
+    l4:"Kıyamet Ötesi", s4:"512 adım · 8× süper örnek · parça parça render",
+    beyondNote:"Kıyamet Ötesi tek bir kareyi 8 kat çözünürlükte, parça parça işler. Bir kare dakikalar sürebilir ve çok ekran belleği ister. Görüşü döndürmek yeni bir render başlatır.",
+    scaleLbl:"Ölçek", progress:"Render ilerlemesi", trillion:"trilyon",
+    done:"Render tamamlandı. Saklamak için ekran görüntüsü al.", encoding:"Görüntü kodlanıyor…",
+    l0:"Isınma", l1:"Ağır", l2:"Ezici", l3:"Kıyamet",
+    s0:"96 adım · 0,6× çözünürlük", s1:"192 adım · 1× çözünürlük", s2:"384 adım · Retina", s3:"512 adım · 1,5× süper örnek",
+    ack:"Riskleri okudum. Cihazımın ısınabileceğini ve yavaşlayabileceğini kabul ediyorum.",
+    start:"Başlat",
+    kStop:"durdur", kSpace:"Boşluk", kPause:"duraklat", kLevel:"seviye", kFull:"tam ekran",
+    frameTime:"Kare süresi", resolution:"Çözünürlük", noiseCalls:"Gürültü / kare",
+    billion:"milyar", million:"milyon",
+    pause:"Duraklat", resume:"Devam et", spaceKey:"Boşluk",
+    shotT:"Ekran görüntüsü kaydet", fullT:"Tam ekran (F)", stopT:"Durdur (Esc)",
+    levelToast:l=>l+" seviyesi", paused:"Duraklatıldı", resumed:"Devam ediyor",
+    slow:"Kare hızı 4'ün altında. Cihaz çok zorlanıyor; bir alt seviyeye geçebilirsin.",
+    shotOk:"Ekran görüntüsü kaydedildi", shotFail:"Görüntü alınamadı",
+    fullFail:"Tam ekran bu tarayıcıda açılamadı", fullNo:"Tam ekran bu tarayıcıda desteklenmiyor",
+    spin:"Otomatik dönüş açık",
+    noGL:"Bu tarayıcı WebGL desteklemiyor.", compile:"Shader derlenemedi: ",
+    lost:"Grafik sürücüsü bağlamı sıfırladı; kart yükü kaldıramadı. Daha düşük bir seviyeyle yeniden dene."
+  }
+};
+let lang = "en";
+try { const sl = localStorage.getItem("hk-lang"); if (sl === "tr" || sl === "en") lang = sl; } catch(e){}
+const t = k => I18N[lang][k];
+const fmt = (n, d) => { const s = n.toFixed(d); return lang === "tr" ? s.replace(".", ",") : s; };
+
+const PRESETS = [
+  {steps:96,  light:8,  oct:4, scale:0.6},
+  {steps:192, light:16, oct:6, scale:1.0},
+  {steps:384, light:32, oct:8, scale:"dpr"},
+  {steps:512, light:48, oct:8, scale:"dpr15"},
+  {steps:512, light:48, oct:8, scale:8, tiled:true},
+];
+const TILE = 128, MAX_AREA = 134217728;
+let LIM = 4096, pass = null;
+const $ = id => document.getElementById(id);
+const canvas = $("c"), gate = $("gate"), topUI = $("top"), dock = $("dock");
+const ack = $("ack"), go = $("go");
+
+function applyLang(){
+  document.documentElement.lang = lang;
+  document.querySelectorAll("[data-i18n]").forEach(el => { el.textContent = t(el.dataset.i18n); });
+  document.querySelectorAll("[data-i18n-aria]").forEach(el => el.setAttribute("aria-label", t(el.dataset.i18nAria)));
+  document.querySelectorAll("[data-i18n-title]").forEach(el => el.title = t(el.dataset.i18nTitle));
+  document.querySelectorAll(".lang button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.lang === lang)));
+  setPauseIcon();
+  if(running){ resize(); if(!$("alert").hidden) $("alert").textContent = t("slow"); }
+}
+function setLang(l){
+  lang = l;
+  try { localStorage.setItem("hk-lang", l); } catch(e){}
+  applyLang();
+}
+document.querySelectorAll(".lang button").forEach(b => b.addEventListener("click", () => setLang(b.dataset.lang)));
+
+try { const s = localStorage.getItem("hk-level"); if (s !== null && $("lvl"+s)) $("lvl"+s).checked = true; } catch(e){}
+ack.addEventListener("change", () => { go.disabled = !ack.checked; });
+const syncNote = () => { $("beyondNote").hidden = !$("lvl4").checked; };
+document.querySelectorAll('input[name="lvl"]').forEach(r => r.addEventListener("change", syncNote));
+syncNote();
+
+const VS = "attribute vec2 p; void main(){ gl_Position = vec4(p,0.,1.); }";
+const FS = `
+precision highp float;
+uniform vec2 uRes; uniform float uTime; uniform vec2 uRot;
+uniform float uSteps, uLSteps, uOct;
+
+float hash(vec3 p){ p = fract(p*0.3183099 + .1); p *= 17.0; return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); }
+float noise(vec3 x){
+  vec3 i = floor(x), f = fract(x); f = f*f*(3.0-2.0*f);
+  return mix(mix(mix(hash(i),             hash(i+vec3(1,0,0)), f.x),
+                 mix(hash(i+vec3(0,1,0)), hash(i+vec3(1,1,0)), f.x), f.y),
+             mix(mix(hash(i+vec3(0,0,1)), hash(i+vec3(1,0,1)), f.x),
+                 mix(hash(i+vec3(0,1,1)), hash(i+vec3(1,1,1)), f.x), f.y), f.z);
+}
+float fbm(vec3 p){
+  float a = .5, s = 0.;
+  for(int i=0;i<8;i++){ if(float(i)>=uOct) break; s += a*noise(p); p = p*2.03 + vec3(1.7,9.2,3.1); a *= .5; }
+  return s;
+}
+float density(vec3 p, out float heat){
+  float t = uTime*.15;
+  float c = cos(p.y*1.3+t), s = sin(p.y*1.3+t);
+  vec3 q = vec3(c*p.x - s*p.z, p.y, s*p.x + c*p.z);
+  vec2 tor = vec2(length(q.xz) - 1.25, q.y);
+  float d = length(tor) - 0.6;
+  float g = dot(sin(p*3.1 + t), cos(p.zxy*3.1 - t)) * .16;
+  float n = fbm(q*2.4 + vec3(0., -t*2.2, t));
+  heat = n;
+  return clamp(-(d + g)*2.2 + (n - .42)*2.6, 0., 1.);
+}
+vec3 aces(vec3 x){ return clamp((x*(2.51*x+.03))/(x*(2.43*x+.59)+.14), 0., 1.); }
+
+void main(){
+  vec2 uv = (gl_FragCoord.xy - .5*uRes) / uRes.y;
+  vec3 ro = 4.3*vec3(cos(uRot.y)*sin(uRot.x), sin(uRot.y), cos(uRot.y)*cos(uRot.x));
+  vec3 fw = normalize(-ro), rt = normalize(cross(vec3(0,1,0), fw)), up = cross(fw, rt);
+  vec3 rd = normalize(fw*1.6 + rt*uv.x + up*uv.y);
+
+  vec3 bg = mix(vec3(.02,.015,.045), vec3(.09,.05,.16), smoothstep(-.7,.9,uv.y));
+  bg += vec3(.10,.06,.02) * exp(-6.0*length(uv - vec2(.0,-.55)));
+  float R = 2.6;
+  float b = dot(ro, rd), cc = dot(ro,ro) - R*R, h = b*b - cc;
+  if(h < 0.){ gl_FragColor = vec4(pow(bg, vec3(.4545)),1.); return; }
+  h = sqrt(h);
+  float t0 = max(-b - h, 0.), t1 = -b + h;
+  float dt = (t1 - t0) / uSteps;
+  float t = t0 + dt*hash(vec3(gl_FragCoord.xy, fract(uTime)*91.));
+
+  vec3 Lp = vec3(2.4*cos(uTime*.4), 1.8, 2.4*sin(uTime*.4));
+  vec3 col = vec3(0.); float T = 1.;
+  for(int i=0;i<512;i++){
+    if(float(i)>=uSteps || T < .01) break;
+    vec3 p = ro + rd*t;
+    float heat; float dn = density(p, heat);
+    if(dn > .005){
+      vec3 ld = normalize(Lp - p); float acc = 0.; float hl;
+      for(int j=0;j<48;j++){
+        if(float(j)>=uLSteps) break;
+        acc += density(p + ld*(float(j)+.5)*(1.6/uLSteps), hl);
+      }
+      float sh = exp(-acc*(1.6/uLSteps)*5.5);
+      float phase = .6 + .9*pow(max(dot(rd, ld),0.), 6.);
+      vec3 base = mix(vec3(.30,.16,.75), vec3(1.0,.93,.80), smoothstep(.35,.78,heat));
+      vec3 emi = vec3(1.0,.62,.22) * pow(dn, 3.) * 2.4;
+      float a = dn*dt*7.0;
+      col += T * a * (base*sh*phase*3.0 + emi + base*.06);
+      T *= exp(-a);
+    }
+    t += dt;
+  }
+  col += T*bg;
+  col = aces(col*1.12);
+  gl_FragColor = vec4(pow(col, vec3(.4545)), 1.);
+}`;
+
+let gl = null, U = {}, raf = 0, running = false, paused = false, lvl = 1;
+let start = 0, pausedAt = 0, yaw = .6, pit = .35, drag = null, autoSpin = true, wantShot = false;
+
+function initGL(){
+  gl = canvas.getContext("webgl", {antialias:false, powerPreference:"high-performance", preserveDrawingBuffer:true});
+  if(!gl) throw new Error(t("noGL"));
+  const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if(!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(t("compile") + gl.getShaderInfoLog(s)); return s; };
+  const prog = gl.createProgram();
+  gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS));
+  gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS));
+  gl.linkProgram(prog);
+  if(!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+  gl.useProgram(prog);
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(prog, "p"); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  ["uRes","uTime","uRot","uSteps","uLSteps","uOct"].forEach(n => U[n] = gl.getUniformLocation(prog, n));
+  const vp = gl.getParameter(gl.MAX_VIEWPORT_DIMS);
+  LIM = Math.min(vp[0], vp[1], gl.getParameter(gl.MAX_RENDERBUFFER_SIZE), 16384);
+}
+
+function scaleFor(p){
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  return p.scale === "dpr" ? dpr : p.scale === "dpr15" ? dpr*1.5 : p.scale;
+}
+function resize(){
+  const p = PRESETS[lvl], s = scaleFor(p);
+  let w = Math.max(1, Math.round(innerWidth*s)), h = Math.max(1, Math.round(innerHeight*s));
+  const f = Math.min(1, LIM / Math.max(w, h), Math.sqrt(MAX_AREA / (w*h)));
+  if(f < 1){ w = Math.max(1, Math.floor(w*f)); h = Math.max(1, Math.floor(h*f)); }
+  if(canvas.width !== w || canvas.height !== h){ canvas.width = w; canvas.height = h; pass = null; }
+  const bw = gl ? gl.drawingBufferWidth : w, bh = gl ? gl.drawingBufferHeight : h;
+  $("res").textContent = bw + " × " + bh;
+  $("scl").textContent = fmt(bw / innerWidth, 1) + "×";
+  const calls = bw*bh*p.steps*(1 + p.light);
+  $("ops").textContent = calls >= 1e12 ? fmt(calls/1e12, 1) + " " + t("trillion")
+    : calls >= 1e9 ? fmt(calls/1e9, 1) + " " + t("billion") : Math.round(calls/1e6) + " " + t("million");
+  $("progWrap").hidden = !p.tiled;
+}
+function setLevel(l){
+  lvl = l; pass = null;
+  document.querySelectorAll(".seg button").forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.l === l)));
+  try { localStorage.setItem("hk-level", String(l)); } catch(e){}
+  $("alert").hidden = true; slowFor = 0; hist.length = 0;
+  if(running) { resize(); toast(t("levelToast")(t("l"+l))); }
+}
+
+const spark = $("spark"), sctx = spark.getContext("2d"), hist = [];
+function drawSpark(){
+  const W = spark.width, H = spark.height;
+  sctx.clearRect(0,0,W,H);
+  if(hist.length < 2) return;
+  const max = Math.max(30, ...hist), n = 40, step = W/(n-1);
+  const pts = hist.map((v,i) => [W - (hist.length-1-i)*step, H - 2 - (v/max)*(H-4)]);
+  sctx.beginPath(); pts.forEach(([x,y],i) => i ? sctx.lineTo(x,y) : sctx.moveTo(x,y));
+  sctx.lineTo(pts[pts.length-1][0], H); sctx.lineTo(pts[0][0], H); sctx.closePath();
+  const g = sctx.createLinearGradient(0,0,0,H); g.addColorStop(0,"rgba(255,184,77,.35)"); g.addColorStop(1,"rgba(255,184,77,0)");
+  sctx.fillStyle = g; sctx.fill();
+  sctx.beginPath(); pts.forEach(([x,y],i) => i ? sctx.lineTo(x,y) : sctx.moveTo(x,y));
+  sctx.strokeStyle = "#ffb84d"; sctx.lineWidth = 1.5; sctx.stroke();
+  const [lx,ly] = pts[pts.length-1]; sctx.fillStyle = "#fff3d6"; sctx.beginPath(); sctx.arc(lx-2, ly, 2.5, 0, 7); sctx.fill();
+}
+
+function updateProg(){
+  if(!pass) return;
+  const pc = pass.i / pass.tiles.length * 100;
+  $("pct").textContent = fmt(pc, pc < 10 ? 1 : 0) + "%";
+  $("bar").style.width = pc + "%";
+}
+function renderTiles(now, W, H){
+  if(!pass || pass.W !== W || pass.H !== H){
+    const tiles = [], cx = W/2, cy = H/2;
+    for(let y = 0; y < H; y += TILE) for(let x = 0; x < W; x += TILE) tiles.push([x, y]);
+    tiles.sort((a, b) => Math.hypot(a[0]+TILE/2-cx, a[1]+TILE/2-cy) - Math.hypot(b[0]+TILE/2-cx, b[1]+TILE/2-cy));
+    pass = {W, H, tiles, i:0, n:2, time:(now - start)/1000, yaw, pit, lastT:0, done:false};
+    gl.disable(gl.SCISSOR_TEST); gl.clearColor(.02, .015, .045, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+    updateProg();
+  }
+  if(pass.done) return;
+  if(pass.lastT){ const d = now - pass.lastT; if(d < 34) pass.n = Math.min(pass.n*2, 256); else if(d > 90) pass.n = Math.max(1, pass.n >> 1); }
+  pass.lastT = now;
+  gl.uniform1f(U.uTime, pass.time);
+  gl.uniform2f(U.uRot, pass.yaw, pass.pit);
+  gl.enable(gl.SCISSOR_TEST);
+  for(let k = 0; k < pass.n && pass.i < pass.tiles.length; k++){
+    const [x, y] = pass.tiles[pass.i++];
+    gl.scissor(x, y, Math.min(TILE, W - x), Math.min(TILE, H - y));
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.flush();
+  }
+  gl.disable(gl.SCISSOR_TEST);
+  updateProg();
+  if(pass.i >= pass.tiles.length){ pass.done = true; toast(t("done"), 4500); }
+}
+
+let last = 0, acc = 0, frames = 0, slowFor = 0;
+function frame(now){
+  raf = requestAnimationFrame(frame);
+  if(paused || !gl) return;
+  const p = PRESETS[lvl];
+  const W = gl.drawingBufferWidth, H = gl.drawingBufferHeight;
+  gl.viewport(0, 0, W, H);
+  gl.uniform2f(U.uRes, W, H);
+  gl.uniform1f(U.uSteps, p.steps); gl.uniform1f(U.uLSteps, p.light); gl.uniform1f(U.uOct, p.oct);
+  if(p.tiled) renderTiles(now, W, H);
+  else {
+    gl.disable(gl.SCISSOR_TEST);
+    if(autoSpin && !drag) yaw += .0025;
+    gl.uniform1f(U.uTime, (now - start)/1000);
+    gl.uniform2f(U.uRot, yaw, pit);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+
+  if(last){
+    acc += now - last; frames++;
+    if(acc > 500){
+      const fps = frames*1000/acc, el = $("fps");
+      el.textContent = fps < 10 ? fmt(fps, 1) : Math.round(fps);
+      el.className = fps < 15 ? "low" : fps < 40 ? "mid" : "";
+      $("ms").textContent = Math.round(acc/frames) + " ms";
+      hist.push(fps); if(hist.length > 40) hist.shift(); drawSpark();
+      slowFor = fps < 4 ? slowFor + acc : 0;
+      const al = $("alert");
+      if(!p.tiled && slowFor > 3000 && lvl > 0){ al.textContent = t("slow"); al.hidden = false; }
+      else if(p.tiled || fps >= 4) al.hidden = true;
+      acc = 0; frames = 0;
+    }
+  }
+  last = now;
+}
+
+function begin(){
+  const l = +document.querySelector('input[name="lvl"]:checked').value;
+  $("err").hidden = true;
+  try { if(!gl) initGL(); } catch(e){ showErr(e.message); gl = null; return; }
+  gate.hidden = true; topUI.hidden = false; dock.hidden = false;
+  running = true; paused = false; pass = null; setPauseIcon();
+  setLevel(l); resize();
+  last = 0; acc = 0; frames = 0; start = performance.now();
+  $("fps").textContent = "–"; $("ms").textContent = "–";
+  cancelAnimationFrame(raf); raf = requestAnimationFrame(frame);
+}
+function stop(){
+  running = false; pass = null; cancelAnimationFrame(raf);
+  if(document.fullscreenElement) document.exitFullscreen().catch(()=>{});
+  if(gl){ gl.disable(gl.SCISSOR_TEST); gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT); }
+  canvas.width = 1; canvas.height = 1;
+  topUI.hidden = true; dock.hidden = true; gate.hidden = false;
+  const r = document.querySelector('input[name="lvl"][value="'+lvl+'"]'); if(r) r.checked = true;
+}
+function showErr(msg){ const e = $("err"); e.textContent = msg; e.hidden = false; }
+
+function setPauseIcon(){
+  $("icPause").hidden = paused; $("icPlay").hidden = !paused;
+  const label = (paused ? t("resume") : t("pause"));
+  $("pause").setAttribute("aria-label", label);
+  $("pause").title = label + " (" + t("spaceKey") + ")";
+}
+function togglePause(){
+  paused = !paused;
+  if(paused) pausedAt = performance.now(); else { start += performance.now() - pausedAt; last = 0; }
+  setPauseIcon(); toast(paused ? t("paused") : t("resumed"));
+}
+function toggleFull(){
+  if(document.fullscreenElement) document.exitFullscreen().catch(()=>{});
+  else if(document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => toast(t("fullFail")));
+  else toast(t("fullNo"));
+}
+function saveShot(){
+  canvas.toBlob(b => {
+    if(!b){ toast(t("shotFail")); return; }
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(b);
+    a.download = "hyperkaymak-" + new Date().toISOString().slice(0,19).replace(/[:T]/g,"-") + ".png";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    toast(t("shotOk"));
+  }, "image/png");
+}
+let tt = 0;
+function toast(msg, ms = 1600){ const el = $("toast"); el.textContent = msg; el.classList.remove("off"); clearTimeout(tt); tt = setTimeout(() => el.classList.add("off"), ms); }
+
+$("gateForm").addEventListener("submit", e => { e.preventDefault(); if(ack.checked) begin(); });
+$("stop").addEventListener("click", stop);
+$("pause").addEventListener("click", togglePause);
+$("full").addEventListener("click", toggleFull);
+$("shot").addEventListener("click", () => { toast(t("encoding"), 8000); setTimeout(saveShot, 40); });
+document.querySelectorAll(".seg button").forEach(b => b.addEventListener("click", () => setLevel(+b.dataset.l)));
+
+addEventListener("keydown", e => {
+  if(!running) return;
+  if(e.key === "Escape") stop();
+  else if(e.key === " "){ e.preventDefault(); togglePause(); }
+  else if(e.key === "f" || e.key === "F") toggleFull();
+  else if(/^[1-5]$/.test(e.key)) setLevel(+e.key - 1);
+});
+addEventListener("resize", () => { if(running) resize(); });
+document.addEventListener("visibilitychange", () => { if(document.hidden && running && !paused) togglePause(); });
+canvas.addEventListener("webglcontextlost", e => {
+  e.preventDefault(); gl = null; U = {}; stop();
+  showErr(t("lost"));
+});
+
+canvas.addEventListener("pointerdown", e => { drag = {x:e.clientX, y:e.clientY, moved:false}; autoSpin = false; canvas.setPointerCapture(e.pointerId); });
+canvas.addEventListener("pointermove", e => {
+  if(!drag) return;
+  yaw -= (e.clientX - drag.x)*.006; pit = Math.max(-1.3, Math.min(1.3, pit + (e.clientY - drag.y)*.006));
+  drag = {x:e.clientX, y:e.clientY, moved:true};
+});
+const endDrag = () => { if(drag && drag.moved && PRESETS[lvl].tiled) pass = null; drag = null; };
+canvas.addEventListener("pointerup", endDrag); canvas.addEventListener("pointercancel", endDrag);
+canvas.addEventListener("dblclick", () => { autoSpin = true; toast(t("spin")); });
+
+applyLang();
+})();
+</script>
+</body>
+</html>
