@@ -1,1 +1,0 @@
-# LegendKaymak.github.io
